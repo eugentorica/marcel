@@ -27,8 +27,14 @@ module Marcel
       #
       # If no type can be determined, then +application/octet-stream+ is returned.
       def for(pathname_or_io = nil, name: nil, extension: nil, declared_type: nil)
-        filename_type = for_name(name) || for_extension(extension)
-        most_specific_type for_data(pathname_or_io), for_declared_type(declared_type), filename_type, BINARY
+        type_from_data = for_data(pathname_or_io)
+        fallback_type = for_declared_type(declared_type) || for_name(name) || for_extension(extension) || BINARY
+
+        if type_from_data
+          most_specific_type type_from_data, fallback_type
+        else
+          fallback_type
+        end
       end
 
       private
@@ -62,10 +68,9 @@ module Marcel
         def for_declared_type(declared_type)
           type = parse_media_type(declared_type)
 
-          # application/octet-stream is treated as an undeclared/missing type,
-          # allowing the type to be inferred from the filename. If there's no
-          # filename extension, then the type falls back to binary anyway.
-          type unless type == BINARY
+          if type != BINARY && !type.nil?
+            type.downcase
+          end
         end
 
         def with_io(pathname_or_io, &block)
@@ -86,9 +91,19 @@ module Marcel
         # For some document types (notably Microsoft Office) we recognise the main content
         # type with magic, but not the specific subclass. In this situation, if we can get a more
         # specific class using either the name or declared_type, we should use that in preference
-        def most_specific_type(*candidates)
-          candidates.compact.uniq.reduce do |type, candidate|
-            Marcel::Magic.child?(candidate, type) ? candidate : type
+        def most_specific_type(from_magic_type, fallback_type)
+          if (root_types(from_magic_type) & root_types(fallback_type)).any?
+            fallback_type
+          else
+            from_magic_type
+          end
+        end
+
+        def root_types(type)
+          if TYPE_EXTS[type].nil? || TYPE_PARENTS[type].nil?
+            [ type ]
+          else
+            TYPE_PARENTS[type].map {|t| root_types t }.flatten
           end
         end
     end
